@@ -1,57 +1,43 @@
 package calendar
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
 
-type EventInThePast struct {
-	Start time.Time
-}
-
-func (e EventInThePast) Error() string {
-	return fmt.Sprintf(
-		"an event start date cannot be in the past: %q",
-		e.Start.Format(time.RFC1123),
-	)
-}
-
-var MissingTitle = errors.New("event is missing a title")
-
-type InvalidDruation struct {
-	Duration time.Duration
-}
-
-func (e InvalidDruation) Error() string {
-	return fmt.Sprintf(
-		"a duration must positive and non zero: %q",
-		e.Duration.String(),
-	)
-}
-
 type Calendar struct {
 	Id     string
-	Events []Event
+	Events Timeline
 	// will probably become necessary
 	// from time.Time
 	// to time.Time
 }
 
-type Event struct {
-	Id       string
-	Title    string
-	Start    time.Time
-	Duration time.Duration
+type SchedulingConflict struct {
+	NewEvent *Event
+	ExistingEvent *Event
+}
+
+func (sc SchedulingConflict) Error() string {
+	return fmt.Sprintf(
+		"scheduling conflict between %10q on %s \n and \n %10q on %s ",
+		sc.NewEvent.Title,
+		sc.NewEvent.Start.Format(time.RFC1123),
+		sc.ExistingEvent.Title,
+		sc.ExistingEvent.Start.Format(time.RFC1123),
+	)
 }
 
 func (c *Calendar) NewEvent(ev *Event) error {
-	if len(ev.Title) == 0 {
-		return MissingTitle
-	}
-	if !ev.Start.After(time.Now()) {
-		return EventInThePast{ev.Start}
-	}
 	fmt.Println("new event created")
+	if err := ev.validate(); err != nil {
+		return err
+	}
+	if collisions := c.Events.findOverlap(ev); len(collisions) > 0 {
+		return SchedulingConflict{
+			NewEvent:       ev,
+			ExistingEvent: collisions[0],
+		}
+	}
 	return nil
 }

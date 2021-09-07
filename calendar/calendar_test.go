@@ -8,28 +8,29 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestNewEvent(t *testing.T) {
-	c := &Calendar{}
-
-	title := "my event"
-	start := time.Date(2021, 8, 26, 0, 0, 0, 0, time.Local)
-	duration, _ := time.ParseDuration("45m")
-	ev := &Event{
-		Id:       "",
-		Title:    title,
-		Start:    start,
-		Duration: duration,
-	}
-
-	err := c.NewEvent(ev)
-
-	if err != nil {
-		t.Fatalf("unexpected error %q", err)
-	}
-}
-
 func TestEventInsertion(t *testing.T) {
-	calendar := &Calendar{}
+	now := time.Now()
+	past := now.Add(-5 * time.Minute)
+	future := now.Add(time.Minute)
+	busyDate := now.Add(24 * time.Hour)
+
+	calendar := &Calendar{
+		Events: Timeline{[]*Event{
+			{
+				Id:       uuid.NewString(),
+				Title:    "busy1",
+				Start:    busyDate,
+				Duration: time.Hour,
+			},
+			{
+				Id:       uuid.NewString(),
+				Title:    "busy2",
+				Start:    busyDate.Add(time.Hour),
+				Duration: time.Hour,
+			},
+		}},
+	}
+
 	cases := map[string]struct {
 		ev  Event
 		err error
@@ -38,7 +39,7 @@ func TestEventInsertion(t *testing.T) {
 			Event{
 				Id:       uuid.NewString(),
 				Title:    "title1",
-				Start:    time.Now().Add(time.Minute),
+				Start:    future,
 				Duration: time.Hour,
 			},
 			nil,
@@ -47,7 +48,7 @@ func TestEventInsertion(t *testing.T) {
 			Event{
 				Id:       "",
 				Title:    "title2",
-				Start:    time.Now().Add(time.Minute),
+				Start:    future,
 				Duration: time.Hour,
 			},
 			nil,
@@ -56,7 +57,7 @@ func TestEventInsertion(t *testing.T) {
 			Event{
 				Id:       "",
 				Title:    "",
-				Start:    time.Now().Add(time.Minute),
+				Start:    future,
 				Duration: time.Hour,
 			},
 			MissingTitle,
@@ -65,28 +66,28 @@ func TestEventInsertion(t *testing.T) {
 			Event{
 				Id:       "",
 				Title:    "title3",
-				Start:    time.Now().Add(-5 * time.Minute),
+				Start:    past,
 				Duration: time.Hour,
 			},
-			EventInThePast{},
+			EventInThePast{past},
 		},
 		"Duration zero": {
 			Event{
 				Id:       "",
 				Title:    "title4",
-				Start:    time.Now().Add(time.Minute),
+				Start:    future,
 				Duration: 0,
 			},
-			InvalidDruation{},
+			InvalidDuration{0},
 		},
 		"Duration negative": {
 			Event{
 				Id:       "",
 				Title:    "title5",
-				Start:    time.Now().Add(time.Minute),
+				Start:    future,
 				Duration: -5 * time.Minute,
 			},
-			InvalidDruation{},
+			InvalidDuration{-5 * time.Minute},
 		},
 	}
 	for test, data := range cases {
@@ -96,8 +97,68 @@ func TestEventInsertion(t *testing.T) {
 			t.Errorf("unexpected error\n\tgot: %q", err)
 			continue
 		}
-		if data.err != nil && !errors.As(err, &data.err) {
-			t.Errorf("unexpected error\n\tgot: %T\n\twanted: %T", err, data.err)
+
+		if data.err != nil && !errors.Is(err, data.err) {
+			t.Errorf("unexpected error\n\tgot: %q\n\twanted: %q", err, data.err)
+		}
+	}
+}
+
+func TestSchedulingConflicts(t *testing.T) {
+	now := time.Now()
+	busyDate := now.Add(24 * time.Hour)
+	previousEvent := &Event{
+		Id:       uuid.NewString(),
+		Title:    "busy1",
+		Start:    busyDate,
+		Duration: time.Hour,
+	}
+
+	calendar := &Calendar{
+		Events: Timeline{[]*Event{
+			previousEvent,
+		}},
+	}
+	cases := map[string]struct {
+		ev  Event
+		err error
+	}{
+		"Collision start during event": {
+			Event{
+				Id:       "",
+				Title:    "title6",
+				Start:    previousEvent.Start.Add(10 * time.Minute),
+				Duration: time.Hour,
+			},
+			SchedulingConflict{
+				NewEvent: &Event{
+					Title: "title6",
+					Start: busyDate.Add(10 * time.Minute),
+				},
+				ExistingEvent: previousEvent,
+			},
+		},
+		"Collision running into event": {
+			Event{
+				Id:       "",
+				Title:    "title7",
+				Start:    previousEvent.Start.Add(-10 * time.Minute),
+				Duration: time.Hour,
+			},
+			SchedulingConflict{
+				NewEvent: &Event{
+					Title: "title7",
+					Start: busyDate.Add(-10 * time.Minute),
+				},
+				ExistingEvent: previousEvent,
+			},
+		},
+	}
+	for test, data := range cases {
+		t.Log(test)
+		err := calendar.NewEvent(&data.ev)
+		if err.Error() != data.err.Error() {
+			t.Errorf("unexpected error\n\tgot: %q\n\twanted: %q", err, data.err)
 		}
 	}
 }
